@@ -8,6 +8,7 @@ pub const Error = error{
     DecodedTooShort,
     DecodedTooLong,
     BufferTooSmall,
+    OverlappingBuffers,
 };
 
 pub const bitcoin_alphabet_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".*;
@@ -16,6 +17,23 @@ const invalid_char: u8 = 0xff;
 const checksum_len: usize = 4;
 const max_usize = std.math.maxInt(usize);
 const bitcoin_char_to_index = buildCharToIndexTable(bitcoin_alphabet_chars);
+
+comptime {
+    assert(checksum_len == 4);
+    assert(invalid_char == 0xff);
+    assert(bitcoin_alphabet_chars.len == 58);
+    assert(bitcoin_alphabet_chars[0] == '1');
+
+    var char_in_alphabet = [_]bool{false} ** 256;
+    for (bitcoin_alphabet_chars) |c| {
+        assert(!char_in_alphabet[c]);
+        char_in_alphabet[c] = true;
+    }
+
+    assert(bitcoin_char_to_index['1'] == 0);
+    assert(bitcoin_char_to_index['z'] == 57);
+    assert(bitcoin_char_to_index['0'] == invalid_char);
+}
 
 pub const DecodedCheck = struct {
     version: u8,
@@ -29,56 +47,36 @@ pub fn DecodedCheckComptime(comptime payload_len: usize) type {
     };
 }
 
-/// Base58 codecs.
-/// This package intentionally ships only the Bitcoin alphabet preset.
-pub const Codecs = struct {
-    alphabet_chars: [58]u8,
-    Encoder: Base58Encoder,
-    Decoder: Base58Decoder,
-    CheckEncoder: Base58CheckEncoder,
-    CheckDecoder: Base58CheckDecoder,
-};
-
-pub const bitcoin = Codecs{
-    .alphabet_chars = bitcoin_alphabet_chars,
-    .Encoder = Base58Encoder.init(bitcoin_alphabet_chars),
-    .Decoder = Base58Decoder.init(bitcoin_alphabet_chars),
-    .CheckEncoder = Base58CheckEncoder.init(bitcoin_alphabet_chars),
-    .CheckDecoder = Base58CheckDecoder.init(bitcoin_alphabet_chars),
-};
-
 pub const Base58Encoder = struct {
-    alphabet_chars: [58]u8,
-
-    pub fn init(alphabet_chars: [58]u8) Base58Encoder {
-        var char_in_alphabet = [_]bool{false} ** 256;
-        for (alphabet_chars) |c| {
-            assert(!char_in_alphabet[c]);
-            char_in_alphabet[c] = true;
-        }
-        return Base58Encoder{
-            .alphabet_chars = alphabet_chars,
-        };
-    }
-
     /// Returns a safe upper bound for encoded output size.
     pub fn calcSizeUpperBound(encoder: *const Base58Encoder, source_len: usize) usize {
         _ = encoder;
         if (source_len == 0) return 0;
-        return scaledUpperBound(source_len, 138, 100);
+
+        const upper_bound = scaledUpperBound(source_len, 138, 100);
+        assert(upper_bound >= 1);
+        return upper_bound;
     }
 
     /// Returns a tighter upper bound for a concrete source slice.
     pub fn calcSizeUpperBoundForSlice(encoder: *const Base58Encoder, source: []const u8) usize {
         _ = encoder;
         const leading_zeros = countLeadingZeroBytes(source);
+        assert(leading_zeros <= source.len);
         const significant_len = source.len - leading_zeros;
+        assert(significant_len + leading_zeros == source.len);
         if (significant_len == 0) return leading_zeros;
-        return checkedAddOrMax(leading_zeros, scaledUpperBound(significant_len, 138, 100));
+
+        const upper_bound = checkedAddOrMax(leading_zeros, scaledUpperBound(significant_len, 138, 100));
+        assert(upper_bound >= leading_zeros);
+        return upper_bound;
     }
 
     /// Encodes `source` into `dest` and returns the written slice.
     pub fn encode(encoder: *const Base58Encoder, dest: []u8, source: []const u8) Error![]const u8 {
+        _ = encoder;
+        if (!@inComptime() and slicesOverlap(dest, source)) return error.OverlappingBuffers;
+
         var length: usize = 0;
         try encodeChunkToDigits(dest, &length, source);
 
@@ -87,33 +85,17 @@ pub const Base58Encoder = struct {
 
         var i: usize = 0;
         while (i < length) : (i += 1) {
-            dest[i] = encoder.alphabet_chars[dest[i]];
+            const digit = dest[i];
+            assert(digit < bitcoin_alphabet_chars.len);
+            dest[i] = bitcoin_alphabet_chars[digit];
         }
+        assert(length <= dest.len);
         std.mem.reverse(u8, dest[0..length]);
         return dest[0..length];
     }
 };
 
 pub const Base58Decoder = struct {
-    alphabet_chars: [58]u8,
-    char_to_index: [256]u8,
-
-    pub fn init(alphabet_chars: [58]u8) Base58Decoder {
-        var result = Base58Decoder{
-            .alphabet_chars = alphabet_chars,
-            .char_to_index = [_]u8{invalid_char} ** 256,
-        };
-
-        var char_in_alphabet = [_]bool{false} ** 256;
-        for (alphabet_chars, 0..) |c, i| {
-            assert(!char_in_alphabet[c]);
-            result.char_to_index[c] = @intCast(i);
-            char_in_alphabet[c] = true;
-        }
-
-        return result;
-    }
-
     /// Returns a safe upper bound for decoded output size.
     pub fn calcSizeUpperBound(decoder: *const Base58Decoder, source_len: usize) usize {
         _ = decoder;
@@ -122,10 +104,16 @@ pub const Base58Decoder = struct {
 
     /// Returns a tighter upper bound for a concrete source slice.
     pub fn calcSizeUpperBoundForSlice(decoder: *const Base58Decoder, source: []const u8) usize {
-        const leading_ones = countLeadingZeroChars(source, decoder.alphabet_chars[0]);
+        _ = decoder;
+        const leading_ones = countLeadingZeroChars(source, bitcoin_alphabet_chars[0]);
+        assert(leading_ones <= source.len);
         const significant_len = source.len - leading_ones;
+        assert(significant_len + leading_ones == source.len);
         if (significant_len == 0) return leading_ones;
-        return checkedAddOrMax(leading_ones, scaledUpperBound(significant_len, 11, 15));
+
+        const upper_bound = checkedAddOrMax(leading_ones, scaledUpperBound(significant_len, 11, 15));
+        assert(upper_bound >= leading_ones);
+        return upper_bound;
     }
 
     /// Decodes `source` into `dest` and returns the written slice.
@@ -136,13 +124,19 @@ pub const Base58Decoder = struct {
     /// Decodes `source` into `dest` with a hard cap for decoded size.
     /// Useful for untrusted input where callers want to bound work and output.
     pub fn decodeWithMaxDecodedLen(decoder: *const Base58Decoder, dest: []u8, source: []const u8, max_decoded_len: usize) Error![]const u8 {
+        _ = decoder;
+        if (!@inComptime() and slicesOverlap(dest, source)) return error.OverlappingBuffers;
+
         var length: usize = 0;
-        const leading_ones = countLeadingZeroChars(source, decoder.alphabet_chars[0]);
+        const leading_ones = countLeadingZeroChars(source, bitcoin_alphabet_chars[0]);
+        assert(leading_ones <= source.len);
         if (leading_ones > max_decoded_len) return error.DecodedTooLong;
+        assert(leading_ones <= max_decoded_len);
 
         for (source) |c| {
-            var carry: u32 = decoder.char_to_index[c];
+            var carry: u32 = bitcoin_char_to_index[c];
             if (carry == @as(u32, invalid_char)) return error.InvalidCharacter;
+            assert(carry < 58);
 
             var i: usize = 0;
             while (i < length) : (i += 1) {
@@ -160,6 +154,8 @@ pub const Base58Decoder = struct {
 
             // Keep checking progressively to fail early on oversized decodes.
             if (length > max_decoded_len - leading_ones) return error.DecodedTooLong;
+            assert(length <= max_decoded_len - leading_ones);
+            assert(length <= dest.len);
         }
 
         var i: usize = 0;
@@ -170,27 +166,28 @@ pub const Base58Decoder = struct {
             length += 1;
         }
 
+        assert(length <= max_decoded_len);
+        assert(length <= dest.len);
         std.mem.reverse(u8, dest[0..length]);
         return dest[0..length];
     }
 };
 
 pub const Base58CheckEncoder = struct {
-    encoder: Base58Encoder,
-
-    pub fn init(alphabet_chars: [58]u8) Base58CheckEncoder {
-        return Base58CheckEncoder{
-            .encoder = Base58Encoder.init(alphabet_chars),
-        };
-    }
-
     /// Returns a safe upper bound for encoded Base58Check output size.
     pub fn calcSizeUpperBound(check_encoder: *const Base58CheckEncoder, payload_len: usize) usize {
-        return check_encoder.encoder.calcSizeUpperBound(checkedAddOrMax(payload_len, 1 + checksum_len));
+        _ = check_encoder;
+        const encoder = Base58Encoder{};
+        const expanded_payload_len = checkedAddOrMax(payload_len, 1 + checksum_len);
+        assert(expanded_payload_len >= payload_len);
+        return encoder.calcSizeUpperBound(expanded_payload_len);
     }
 
     /// Encodes `version + payload + checksum(version+payload)` into Base58.
     pub fn encode(check_encoder: *const Base58CheckEncoder, dest: []u8, version: u8, payload: []const u8) Error![]const u8 {
+        _ = check_encoder;
+        if (!@inComptime() and slicesOverlap(dest, payload)) return error.OverlappingBuffers;
+
         const check = checksumVersionPayload(version, payload);
 
         var length: usize = 0;
@@ -204,7 +201,7 @@ pub const Base58CheckEncoder = struct {
 
         var i: usize = 0;
         while (i < length) : (i += 1) {
-            dest[i] = check_encoder.encoder.alphabet_chars[dest[i]];
+            dest[i] = bitcoin_alphabet_chars[dest[i]];
         }
         std.mem.reverse(u8, dest[0..length]);
         return dest[0..length];
@@ -212,42 +209,49 @@ pub const Base58CheckEncoder = struct {
 };
 
 pub const Base58CheckDecoder = struct {
-    decoder: Base58Decoder,
-
-    pub fn init(alphabet_chars: [58]u8) Base58CheckDecoder {
-        return Base58CheckDecoder{
-            .decoder = Base58Decoder.init(alphabet_chars),
-        };
-    }
-
     /// Returns a safe upper bound for decoded bytes (including version+checksum).
     pub fn calcSizeUpperBound(check_decoder: *const Base58CheckDecoder, source_len: usize) usize {
-        return check_decoder.decoder.calcSizeUpperBound(source_len);
+        _ = check_decoder;
+        const decoder = Base58Decoder{};
+        return decoder.calcSizeUpperBound(source_len);
     }
 
     /// Returns a tighter upper bound for decoded bytes (including version+checksum).
     pub fn calcSizeUpperBoundForSlice(check_decoder: *const Base58CheckDecoder, source: []const u8) usize {
-        return check_decoder.decoder.calcSizeUpperBoundForSlice(source);
+        _ = check_decoder;
+        const decoder = Base58Decoder{};
+        return decoder.calcSizeUpperBoundForSlice(source);
     }
 
     /// Returns a safe upper bound for payload length after successful Base58Check decode.
     pub fn calcPayloadSizeUpperBound(check_decoder: *const Base58CheckDecoder, source_len: usize) usize {
         const decoded_upper = check_decoder.calcSizeUpperBound(source_len);
-        return if (decoded_upper < 1 + checksum_len) 0 else decoded_upper - (1 + checksum_len);
+        if (decoded_upper < 1 + checksum_len) return 0;
+
+        const payload_upper = decoded_upper - (1 + checksum_len);
+        assert(payload_upper + (1 + checksum_len) == decoded_upper);
+        return payload_upper;
     }
 
     /// Returns a tighter upper bound for payload length after successful Base58Check decode.
     pub fn calcPayloadSizeUpperBoundForSlice(check_decoder: *const Base58CheckDecoder, source: []const u8) usize {
         const decoded_upper = check_decoder.calcSizeUpperBoundForSlice(source);
-        return if (decoded_upper < 1 + checksum_len) 0 else decoded_upper - (1 + checksum_len);
+        if (decoded_upper < 1 + checksum_len) return 0;
+
+        const payload_upper = decoded_upper - (1 + checksum_len);
+        assert(payload_upper + (1 + checksum_len) == decoded_upper);
+        return payload_upper;
     }
 
     /// Decodes Base58Check bytes, validates checksum, and returns version + payload view.
     pub fn decode(check_decoder: *const Base58CheckDecoder, dest: []u8, source: []const u8) Error!DecodedCheck {
-        const decoded = try check_decoder.decoder.decode(dest, source);
+        _ = check_decoder;
+        const decoder = Base58Decoder{};
+        const decoded = try decoder.decode(dest, source);
         if (decoded.len < 1 + checksum_len) return error.DecodedTooShort;
 
         const check_start = decoded.len - checksum_len;
+        assert(check_start >= 1);
         const expected = checksum(decoded[0..check_start]);
         if (!std.mem.eql(u8, decoded[check_start..], expected[0..])) {
             return error.InvalidChecksum;
@@ -261,11 +265,15 @@ pub const Base58CheckDecoder = struct {
 
     /// Decodes Base58Check with an explicit payload-size cap.
     pub fn decodeWithMaxPayloadLen(check_decoder: *const Base58CheckDecoder, dest: []u8, source: []const u8, max_payload_len: usize) Error!DecodedCheck {
+        _ = check_decoder;
         const max_decoded_len = std.math.add(usize, max_payload_len, 1 + checksum_len) catch return error.DecodedTooLong;
-        const decoded = try check_decoder.decoder.decodeWithMaxDecodedLen(dest, source, max_decoded_len);
+        assert(max_decoded_len >= 1 + checksum_len);
+        const decoder = Base58Decoder{};
+        const decoded = try decoder.decodeWithMaxDecodedLen(dest, source, max_decoded_len);
         if (decoded.len < 1 + checksum_len) return error.DecodedTooShort;
 
         const check_start = decoded.len - checksum_len;
+        assert(check_start >= 1);
         const expected = checksum(decoded[0..check_start]);
         if (!std.mem.eql(u8, decoded[check_start..], expected[0..])) {
             return error.InvalidChecksum;
@@ -278,6 +286,16 @@ pub const Base58CheckDecoder = struct {
             .payload = decoded[1..check_start],
         };
     }
+};
+
+/// Base58 codecs.
+/// This package intentionally ships only the Bitcoin alphabet preset.
+pub const bitcoin = struct {
+    pub const alphabet_chars = bitcoin_alphabet_chars;
+    pub const Encoder = Base58Encoder{};
+    pub const Decoder = Base58Decoder{};
+    pub const CheckEncoder = Base58CheckEncoder{};
+    pub const CheckDecoder = Base58CheckDecoder{};
 };
 
 pub fn getEncodedLengthUpperBound(decoded_len: usize) usize {
@@ -444,15 +462,18 @@ fn encodeChunkToDigits(dest: []u8, length: *usize, chunk: []const u8) Error!void
         while (i < length.*) : (i += 1) {
             carry += @as(u32, dest[i]) << 8;
             dest[i] = @intCast(carry % 58);
+            assert(dest[i] < 58);
             carry /= 58;
         }
 
         while (carry > 0) : (carry /= 58) {
             if (length.* == dest.len) return error.BufferTooSmall;
             dest[length.*] = @intCast(carry % 58);
+            assert(dest[length.*] < 58);
             length.* += 1;
         }
     }
+    assert(length.* <= dest.len);
 }
 
 fn tryAppendLeadingZerosComptime(buffer: []u8, length: *usize, leading_zeros: usize) void {
@@ -471,22 +492,29 @@ fn appendZeroValues(dest: []u8, length: *usize, zero_count: usize) Error!void {
         dest[length.*] = 0;
         length.* += 1;
     }
+    assert(length.* <= dest.len);
 }
 
 fn buildCharToIndexTable(alphabet_chars: [58]u8) [256]u8 {
     var table = [_]u8{invalid_char} ** 256;
     for (alphabet_chars, 0..) |c, i| {
+        assert(table[c] == invalid_char);
         table[c] = @intCast(i);
     }
     return table;
 }
 
 fn checkedAddOrMax(a: usize, b: usize) usize {
-    return std.math.add(usize, a, b) catch max_usize;
+    const sum = std.math.add(usize, a, b) catch return max_usize;
+    assert(sum >= a);
+    assert(sum >= b);
+    return sum;
 }
 
 fn scaledUpperBound(len: usize, mul: usize, div: usize) usize {
+    assert(div != 0);
     const product = std.math.mul(usize, len, mul) catch return max_usize;
+    assert(product >= len or len == 0 or mul == 0);
     const scaled = @divTrunc(product, div);
     return checkedAddOrMax(scaled, 1);
 }
@@ -494,13 +522,24 @@ fn scaledUpperBound(len: usize, mul: usize, div: usize) usize {
 fn countLeadingZeroBytes(input: []const u8) usize {
     var count: usize = 0;
     while (count < input.len and input[count] == 0) : (count += 1) {}
+    assert(count <= input.len);
     return count;
 }
 
 fn countLeadingZeroChars(input: []const u8, zero_char: u8) usize {
     var count: usize = 0;
     while (count < input.len and input[count] == zero_char) : (count += 1) {}
+    assert(count <= input.len);
     return count;
+}
+
+fn slicesOverlap(a: []const u8, b: []const u8) bool {
+    if (a.len == 0 or b.len == 0) return false;
+
+    const a_start: usize = @intFromPtr(a.ptr);
+    const b_start: usize = @intFromPtr(b.ptr);
+    if (a_start <= b_start) return b_start - a_start < a.len;
+    return a_start - b_start < b.len;
 }
 
 fn countLeadingZeroBytesCheck(version: u8, payload: []const u8, check: [checksum_len]u8) usize {
@@ -583,6 +622,18 @@ test "bitcoin base58 returns BufferTooSmall" {
     try testing.expectError(error.BufferTooSmall, bitcoin.Decoder.decode(&decode_buffer, "2NEpo7TZRRrLZSi2U"));
 }
 
+test "bitcoin base58 rejects overlapping buffers" {
+    var overlap: [64]u8 = undefined;
+    @memset(&overlap, 0);
+    overlap[0] = 0xff;
+    overlap[1] = 1;
+    try testing.expectError(error.OverlappingBuffers, bitcoin.Encoder.encode(overlap[0..], overlap[0..2]));
+
+    const encoded = "2NEpo7TZRRrLZSi2U";
+    @memcpy(overlap[0..encoded.len], encoded);
+    try testing.expectError(error.OverlappingBuffers, bitcoin.Decoder.decode(overlap[0..], overlap[0..encoded.len]));
+}
+
 test "bitcoin base58 bounds are safe for known vectors" {
     for (testingData()) |d| {
         try testing.expect(getEncodedLengthUpperBoundForSlice(d.decoded) >= d.encoded.len);
@@ -613,6 +664,20 @@ test "bitcoin base58check returns InvalidChecksum" {
 test "bitcoin base58check returns DecodedTooShort" {
     var buffer: [64]u8 = undefined;
     try testing.expectError(error.DecodedTooShort, bitcoin.CheckDecoder.decode(&buffer, "1111"));
+}
+
+test "bitcoin base58check rejects overlapping buffers" {
+    const version: u8 = 0;
+    const payload = [_]u8{ 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
+
+    var overlap: [256]u8 = undefined;
+    @memset(&overlap, 0);
+    @memcpy(overlap[0..payload.len], &payload);
+    try testing.expectError(error.OverlappingBuffers, bitcoin.CheckEncoder.encode(overlap[0..], version, overlap[0..payload.len]));
+
+    const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
+    @memcpy(overlap[0..encoded.len], encoded);
+    try testing.expectError(error.OverlappingBuffers, bitcoin.CheckDecoder.decode(overlap[0..], overlap[0..encoded.len]));
 }
 
 test "bitcoin base58check bounds are safe" {
