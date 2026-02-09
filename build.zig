@@ -1,21 +1,30 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
-    const mode = b.standardReleaseOptions();
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
-   // builds the library as a static library
-    {
-    const lib = b.addStaticLibrary("base58z", "src/base58z.zig");
-    lib.setBuildMode(mode);
-    lib.install();
-    }
+    // Build the library as a static library.
+    const lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "base58",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/base58.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(lib);
 
-    // builds and runs the tests
-    {
-    const base58z_tests = b.addTest("src/base58z.zig");
-    base58z_tests.setBuildMode(mode);
-    base58z_tests.use_stage1 = true;
+    // Build and run tests.
+    const base58_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/base58.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_base58_tests = b.addRunArtifact(base58_tests);
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&base58z_tests.step);
-    }
+    test_step.dependOn(&run_base58_tests.step);
 }
