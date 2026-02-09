@@ -11,28 +11,29 @@ pub const Error = error{
     OverlappingBuffers,
 };
 
-pub const bitcoin_alphabet_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".*;
+/// Bitcoin alphabet.
+pub const alphabet_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".*;
 
 const invalid_char: u8 = 0xff;
 const checksum_len: usize = 4;
 const max_usize = std.math.maxInt(usize);
-const bitcoin_char_to_index = buildCharToIndexTable(bitcoin_alphabet_chars);
+const char_to_index = buildCharToIndexTable(alphabet_chars);
 
 comptime {
     assert(checksum_len == 4);
     assert(invalid_char == 0xff);
-    assert(bitcoin_alphabet_chars.len == 58);
-    assert(bitcoin_alphabet_chars[0] == '1');
+    assert(alphabet_chars.len == 58);
+    assert(alphabet_chars[0] == '1');
 
     var char_in_alphabet = [_]bool{false} ** 256;
-    for (bitcoin_alphabet_chars) |c| {
+    for (alphabet_chars) |c| {
         assert(!char_in_alphabet[c]);
         char_in_alphabet[c] = true;
     }
 
-    assert(bitcoin_char_to_index['1'] == 0);
-    assert(bitcoin_char_to_index['z'] == 57);
-    assert(bitcoin_char_to_index['0'] == invalid_char);
+    assert(char_to_index['1'] == 0);
+    assert(char_to_index['z'] == 57);
+    assert(char_to_index['0'] == invalid_char);
 }
 
 pub const DecodedCheck = struct {
@@ -86,8 +87,8 @@ pub const Base58Encoder = struct {
         var i: usize = 0;
         while (i < length) : (i += 1) {
             const digit = dest[i];
-            assert(digit < bitcoin_alphabet_chars.len);
-            dest[i] = bitcoin_alphabet_chars[digit];
+            assert(digit < alphabet_chars.len);
+            dest[i] = alphabet_chars[digit];
         }
         assert(length <= dest.len);
         std.mem.reverse(u8, dest[0..length]);
@@ -105,7 +106,7 @@ pub const Base58Decoder = struct {
     /// Returns a tighter upper bound for a concrete source slice.
     pub fn calcSizeUpperBoundForSlice(decoder: *const Base58Decoder, source: []const u8) usize {
         _ = decoder;
-        const leading_ones = countLeadingZeroChars(source, bitcoin_alphabet_chars[0]);
+        const leading_ones = countLeadingZeroChars(source, alphabet_chars[0]);
         assert(leading_ones <= source.len);
         const significant_len = source.len - leading_ones;
         assert(significant_len + leading_ones == source.len);
@@ -128,13 +129,13 @@ pub const Base58Decoder = struct {
         if (!@inComptime() and slicesOverlap(dest, source)) return error.OverlappingBuffers;
 
         var length: usize = 0;
-        const leading_ones = countLeadingZeroChars(source, bitcoin_alphabet_chars[0]);
+        const leading_ones = countLeadingZeroChars(source, alphabet_chars[0]);
         assert(leading_ones <= source.len);
         if (leading_ones > max_decoded_len) return error.DecodedTooLong;
         assert(leading_ones <= max_decoded_len);
 
         for (source) |c| {
-            var carry: u32 = bitcoin_char_to_index[c];
+            var carry: u32 = char_to_index[c];
             if (carry == @as(u32, invalid_char)) return error.InvalidCharacter;
             assert(carry < 58);
 
@@ -201,7 +202,7 @@ pub const Base58CheckEncoder = struct {
 
         var i: usize = 0;
         while (i < length) : (i += 1) {
-            dest[i] = bitcoin_alphabet_chars[dest[i]];
+            dest[i] = alphabet_chars[dest[i]];
         }
         std.mem.reverse(u8, dest[0..length]);
         return dest[0..length];
@@ -288,63 +289,74 @@ pub const Base58CheckDecoder = struct {
     }
 };
 
-/// Base58 codecs.
-/// This package intentionally ships only the Bitcoin alphabet preset.
-pub const bitcoin = struct {
-    pub const alphabet_chars = bitcoin_alphabet_chars;
-    pub const Encoder = Base58Encoder{};
-    pub const Decoder = Base58Decoder{};
-    pub const CheckEncoder = Base58CheckEncoder{};
-    pub const CheckDecoder = Base58CheckDecoder{};
-};
+pub const Encoder = Base58Encoder{};
+pub const Decoder = Base58Decoder{};
+pub const CheckEncoder = Base58CheckEncoder{};
+pub const CheckDecoder = Base58CheckDecoder{};
+
+pub fn encode(dest: []u8, decoded: []const u8) Error![]const u8 {
+    return Encoder.encode(dest, decoded);
+}
+
+pub fn decode(dest: []u8, encoded: []const u8) Error![]const u8 {
+    return Decoder.decode(dest, encoded);
+}
+
+pub fn encodeCheck(dest: []u8, version: u8, payload: []const u8) Error![]const u8 {
+    return CheckEncoder.encode(dest, version, payload);
+}
+
+pub fn decodeCheck(dest: []u8, encoded: []const u8) Error!DecodedCheck {
+    return CheckDecoder.decode(dest, encoded);
+}
 
 pub fn getEncodedLengthUpperBound(decoded_len: usize) usize {
-    return bitcoin.Encoder.calcSizeUpperBound(decoded_len);
+    return Encoder.calcSizeUpperBound(decoded_len);
 }
 
 pub fn getEncodedLengthUpperBoundForSlice(decoded: []const u8) usize {
-    return bitcoin.Encoder.calcSizeUpperBoundForSlice(decoded);
+    return Encoder.calcSizeUpperBoundForSlice(decoded);
 }
 
 pub fn getDecodedLengthUpperBound(encoded_len: usize) usize {
-    return bitcoin.Decoder.calcSizeUpperBound(encoded_len);
+    return Decoder.calcSizeUpperBound(encoded_len);
 }
 
 pub fn getDecodedLengthUpperBoundForSlice(encoded: []const u8) usize {
-    return bitcoin.Decoder.calcSizeUpperBoundForSlice(encoded);
+    return Decoder.calcSizeUpperBoundForSlice(encoded);
 }
 
 pub fn decodeWithMaxDecodedLength(dest: []u8, encoded: []const u8, max_decoded_len: usize) Error![]const u8 {
-    return bitcoin.Decoder.decodeWithMaxDecodedLen(dest, encoded, max_decoded_len);
+    return Decoder.decodeWithMaxDecodedLen(dest, encoded, max_decoded_len);
 }
 
 pub fn getEncodedCheckLengthUpperBound(payload_len: usize) usize {
-    return bitcoin.CheckEncoder.calcSizeUpperBound(payload_len);
+    return CheckEncoder.calcSizeUpperBound(payload_len);
 }
 
 pub fn getDecodedCheckPayloadLengthUpperBound(encoded_len: usize) usize {
-    return bitcoin.CheckDecoder.calcPayloadSizeUpperBound(encoded_len);
+    return CheckDecoder.calcPayloadSizeUpperBound(encoded_len);
 }
 
 pub fn getDecodedCheckPayloadLengthUpperBoundForSlice(encoded: []const u8) usize {
-    return bitcoin.CheckDecoder.calcPayloadSizeUpperBoundForSlice(encoded);
+    return CheckDecoder.calcPayloadSizeUpperBoundForSlice(encoded);
 }
 
 pub fn decodeCheckWithMaxPayloadLength(dest: []u8, encoded: []const u8, max_payload_len: usize) Error!DecodedCheck {
-    return bitcoin.CheckDecoder.decodeWithMaxPayloadLen(dest, encoded, max_payload_len);
+    return CheckDecoder.decodeWithMaxPayloadLen(dest, encoded, max_payload_len);
 }
 
 pub fn comptimeGetEncodedLength(comptime decoded: []const u8) usize {
     @setEvalBranchQuota(100_000);
     var buffer: [getEncodedLengthUpperBound(decoded.len)]u8 = undefined;
-    const encoded = bitcoin.Encoder.encode(&buffer, decoded) catch unreachable;
+    const encoded = Encoder.encode(&buffer, decoded) catch unreachable;
     return encoded.len;
 }
 
 pub fn comptimeEncode(comptime decoded: []const u8) [comptimeGetEncodedLength(decoded)]u8 {
     @setEvalBranchQuota(100_000);
     var buffer: [getEncodedLengthUpperBound(decoded.len)]u8 = undefined;
-    const encoded = bitcoin.Encoder.encode(&buffer, decoded) catch unreachable;
+    const encoded = Encoder.encode(&buffer, decoded) catch unreachable;
 
     const out_len = comptime comptimeGetEncodedLength(decoded);
     var out: [out_len]u8 = undefined;
@@ -358,7 +370,7 @@ pub fn comptimeGetDecodedLength(comptime encoded: []const u8) usize {
     var length: usize = 0;
 
     for (encoded) |c| {
-        var carry: u32 = bitcoin_char_to_index[c];
+        var carry: u32 = char_to_index[c];
         if (carry == @as(u32, invalid_char)) unreachable;
 
         var i: usize = 0;
@@ -373,7 +385,7 @@ pub fn comptimeGetDecodedLength(comptime encoded: []const u8) usize {
         }
     }
 
-    const leading_ones = countLeadingZeroChars(encoded, bitcoin_alphabet_chars[0]);
+    const leading_ones = countLeadingZeroChars(encoded, alphabet_chars[0]);
     length += leading_ones;
     return length;
 }
@@ -384,7 +396,7 @@ pub fn comptimeDecode(comptime encoded: []const u8) [comptimeGetDecodedLength(en
     var length: usize = 0;
 
     for (encoded) |c| {
-        var carry: u32 = bitcoin_char_to_index[c];
+        var carry: u32 = char_to_index[c];
         if (carry == @as(u32, invalid_char)) unreachable;
 
         var i: usize = 0;
@@ -399,7 +411,7 @@ pub fn comptimeDecode(comptime encoded: []const u8) [comptimeGetDecodedLength(en
         }
     }
 
-    const leading_ones = countLeadingZeroChars(encoded, bitcoin_alphabet_chars[0]);
+    const leading_ones = countLeadingZeroChars(encoded, alphabet_chars[0]);
     tryAppendLeadingZerosComptime(&buffer, &length, leading_ones);
     std.mem.reverse(u8, buffer[0..length]);
 
@@ -412,14 +424,14 @@ pub fn comptimeDecode(comptime encoded: []const u8) [comptimeGetDecodedLength(en
 pub fn comptimeGetEncodedCheckLength(comptime version: u8, comptime payload: []const u8) usize {
     @setEvalBranchQuota(100_000);
     var buffer: [getEncodedCheckLengthUpperBound(payload.len)]u8 = undefined;
-    const encoded = bitcoin.CheckEncoder.encode(&buffer, version, payload) catch unreachable;
+    const encoded = CheckEncoder.encode(&buffer, version, payload) catch unreachable;
     return encoded.len;
 }
 
 pub fn comptimeEncodeCheck(comptime version: u8, comptime payload: []const u8) [comptimeGetEncodedCheckLength(version, payload)]u8 {
     @setEvalBranchQuota(100_000);
     var buffer: [getEncodedCheckLengthUpperBound(payload.len)]u8 = undefined;
-    const encoded = bitcoin.CheckEncoder.encode(&buffer, version, payload) catch unreachable;
+    const encoded = CheckEncoder.encode(&buffer, version, payload) catch unreachable;
 
     const out_len = comptime comptimeGetEncodedCheckLength(version, payload);
     var out: [out_len]u8 = undefined;
@@ -495,9 +507,9 @@ fn appendZeroValues(dest: []u8, length: *usize, zero_count: usize) Error!void {
     assert(length.* <= dest.len);
 }
 
-fn buildCharToIndexTable(alphabet_chars: [58]u8) [256]u8 {
+fn buildCharToIndexTable(alphabet: [58]u8) [256]u8 {
     var table = [_]u8{invalid_char} ** 256;
-    for (alphabet_chars, 0..) |c, i| {
+    for (alphabet, 0..) |c, i| {
         assert(table[c] == invalid_char);
         table[c] = @intCast(i);
     }
@@ -583,109 +595,109 @@ fn checksumVersionPayload(version: u8, payload: []const u8) [checksum_len]u8 {
     return .{ h2[0], h2[1], h2[2], h2[3] };
 }
 
-test "bitcoin base58 vectors roundtrip" {
+test "base58 vectors roundtrip" {
     var encode_buffer: [256]u8 = undefined;
     var decode_buffer: [256]u8 = undefined;
     for (testingData()) |d| {
-        const encoded = try bitcoin.Encoder.encode(&encode_buffer, d.decoded);
+        const encoded = try Encoder.encode(&encode_buffer, d.decoded);
         try testing.expectEqualStrings(d.encoded, encoded);
 
-        const decoded = try bitcoin.Decoder.decode(&decode_buffer, d.encoded);
+        const decoded = try Decoder.decode(&decode_buffer, d.encoded);
         try testing.expectEqualSlices(u8, d.decoded, decoded);
     }
 }
 
-test "bitcoin base58 supports empty slices" {
+test "base58 supports empty slices" {
     var encode_buffer: [8]u8 = undefined;
     var decode_buffer: [8]u8 = undefined;
 
-    const encoded = try bitcoin.Encoder.encode(&encode_buffer, "");
+    const encoded = try Encoder.encode(&encode_buffer, "");
     try testing.expectEqual(@as(usize, 0), encoded.len);
 
-    const decoded = try bitcoin.Decoder.decode(&decode_buffer, "");
+    const decoded = try Decoder.decode(&decode_buffer, "");
     try testing.expectEqual(@as(usize, 0), decoded.len);
 }
 
-test "bitcoin base58 returns InvalidCharacter" {
+test "base58 returns InvalidCharacter" {
     var buffer: [64]u8 = undefined;
-    try testing.expectError(error.InvalidCharacter, bitcoin.Decoder.decode(&buffer, "0"));
-    try testing.expectError(error.InvalidCharacter, bitcoin.Decoder.decode(&buffer, "O"));
-    try testing.expectError(error.InvalidCharacter, bitcoin.Decoder.decode(&buffer, "I"));
-    try testing.expectError(error.InvalidCharacter, bitcoin.Decoder.decode(&buffer, "l"));
+    try testing.expectError(error.InvalidCharacter, Decoder.decode(&buffer, "0"));
+    try testing.expectError(error.InvalidCharacter, Decoder.decode(&buffer, "O"));
+    try testing.expectError(error.InvalidCharacter, Decoder.decode(&buffer, "I"));
+    try testing.expectError(error.InvalidCharacter, Decoder.decode(&buffer, "l"));
 }
 
-test "bitcoin base58 returns BufferTooSmall" {
+test "base58 returns BufferTooSmall" {
     var encode_buffer: [16]u8 = undefined;
-    try testing.expectError(error.BufferTooSmall, bitcoin.Encoder.encode(&encode_buffer, "Hello World!"));
+    try testing.expectError(error.BufferTooSmall, Encoder.encode(&encode_buffer, "Hello World!"));
 
     var decode_buffer: [11]u8 = undefined;
-    try testing.expectError(error.BufferTooSmall, bitcoin.Decoder.decode(&decode_buffer, "2NEpo7TZRRrLZSi2U"));
+    try testing.expectError(error.BufferTooSmall, Decoder.decode(&decode_buffer, "2NEpo7TZRRrLZSi2U"));
 }
 
-test "bitcoin base58 rejects overlapping buffers" {
+test "base58 rejects overlapping buffers" {
     var overlap: [64]u8 = undefined;
     @memset(&overlap, 0);
     overlap[0] = 0xff;
     overlap[1] = 1;
-    try testing.expectError(error.OverlappingBuffers, bitcoin.Encoder.encode(overlap[0..], overlap[0..2]));
+    try testing.expectError(error.OverlappingBuffers, Encoder.encode(overlap[0..], overlap[0..2]));
 
     const encoded = "2NEpo7TZRRrLZSi2U";
     @memcpy(overlap[0..encoded.len], encoded);
-    try testing.expectError(error.OverlappingBuffers, bitcoin.Decoder.decode(overlap[0..], overlap[0..encoded.len]));
+    try testing.expectError(error.OverlappingBuffers, Decoder.decode(overlap[0..], overlap[0..encoded.len]));
 }
 
-test "bitcoin base58 bounds are safe for known vectors" {
+test "base58 bounds are safe for known vectors" {
     for (testingData()) |d| {
         try testing.expect(getEncodedLengthUpperBoundForSlice(d.decoded) >= d.encoded.len);
         try testing.expect(getDecodedLengthUpperBoundForSlice(d.encoded) >= d.decoded.len);
     }
 }
 
-test "bitcoin base58check known vector" {
+test "base58check known vector" {
     const version: u8 = 0;
     const payload = [_]u8{ 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
     const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
 
     var decode_buffer: [256]u8 = undefined;
-    const decoded = try bitcoin.CheckDecoder.decode(&decode_buffer, encoded);
+    const decoded = try CheckDecoder.decode(&decode_buffer, encoded);
     try testing.expectEqual(version, decoded.version);
     try testing.expectEqualSlices(u8, &payload, decoded.payload);
 
     var encode_buffer: [256]u8 = undefined;
-    const encoded_roundtrip = try bitcoin.CheckEncoder.encode(&encode_buffer, version, &payload);
+    const encoded_roundtrip = try CheckEncoder.encode(&encode_buffer, version, &payload);
     try testing.expectEqualStrings(encoded, encoded_roundtrip);
 }
 
-test "bitcoin base58check returns InvalidChecksum" {
+test "base58check returns InvalidChecksum" {
     var buffer: [256]u8 = undefined;
-    try testing.expectError(error.InvalidChecksum, bitcoin.CheckDecoder.decode(&buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHJ"));
+    try testing.expectError(error.InvalidChecksum, CheckDecoder.decode(&buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHJ"));
 }
 
-test "bitcoin base58check returns DecodedTooShort" {
+test "base58check returns DecodedTooShort" {
     var buffer: [64]u8 = undefined;
-    try testing.expectError(error.DecodedTooShort, bitcoin.CheckDecoder.decode(&buffer, "1111"));
+    try testing.expectError(error.DecodedTooShort, CheckDecoder.decode(&buffer, "1111"));
 }
 
-test "bitcoin base58check rejects overlapping buffers" {
+test "base58check rejects overlapping buffers" {
     const version: u8 = 0;
     const payload = [_]u8{ 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
 
     var overlap: [256]u8 = undefined;
     @memset(&overlap, 0);
     @memcpy(overlap[0..payload.len], &payload);
-    try testing.expectError(error.OverlappingBuffers, bitcoin.CheckEncoder.encode(overlap[0..], version, overlap[0..payload.len]));
+    try testing.expectError(error.OverlappingBuffers, CheckEncoder.encode(overlap[0..], version, overlap[0..payload.len]));
 
     const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
     @memcpy(overlap[0..encoded.len], encoded);
-    try testing.expectError(error.OverlappingBuffers, bitcoin.CheckDecoder.decode(overlap[0..], overlap[0..encoded.len]));
+    try testing.expectError(error.OverlappingBuffers, CheckDecoder.decode(overlap[0..], overlap[0..encoded.len]));
 }
 
-test "bitcoin base58check bounds are safe" {
+test "base58check bounds are safe" {
     const version: u8 = 0;
     const payload = [_]u8{0} ** 16;
 
     var encoded_buffer: [256]u8 = undefined;
-    const encoded = try bitcoin.CheckEncoder.encode(&encoded_buffer, version, &payload);
+    const encoded = try CheckEncoder.encode(&encoded_buffer, version, &payload);
 
     try testing.expect(getEncodedCheckLengthUpperBound(payload.len) >= encoded.len);
     try testing.expect(getDecodedLengthUpperBoundForSlice(encoded) >= (payload.len + 1 + checksum_len));
@@ -714,36 +726,36 @@ test "comptime base58check wrappers" {
     try testing.expectEqualSlices(u8, &payload, &decoded.payload);
 }
 
-test "bitcoin base58 upper-bound helpers saturate on overflow" {
-    try testing.expectEqual(max_usize, bitcoin.Encoder.calcSizeUpperBound(max_usize));
-    try testing.expectEqual(max_usize, bitcoin.CheckEncoder.calcSizeUpperBound(max_usize));
+test "base58 upper-bound helpers saturate on overflow" {
+    try testing.expectEqual(max_usize, Encoder.calcSizeUpperBound(max_usize));
+    try testing.expectEqual(max_usize, CheckEncoder.calcSizeUpperBound(max_usize));
 }
 
-test "bitcoin base58 decodeWithMaxDecodedLen enforces cap" {
+test "base58 decodeWithMaxDecodedLen enforces cap" {
     var decode_buffer: [256]u8 = undefined;
 
-    try testing.expectError(error.DecodedTooLong, bitcoin.Decoder.decodeWithMaxDecodedLen(&decode_buffer, "11111", 4));
-    const exact = try bitcoin.Decoder.decodeWithMaxDecodedLen(&decode_buffer, "11111", 5);
+    try testing.expectError(error.DecodedTooLong, Decoder.decodeWithMaxDecodedLen(&decode_buffer, "11111", 4));
+    const exact = try Decoder.decodeWithMaxDecodedLen(&decode_buffer, "11111", 5);
     try testing.expectEqual(@as(usize, 5), exact.len);
 
     const source = [_]u8{0xff} ** 33;
     var encode_buffer: [256]u8 = undefined;
-    const encoded = try bitcoin.Encoder.encode(&encode_buffer, &source);
-    try testing.expectError(error.DecodedTooLong, bitcoin.Decoder.decodeWithMaxDecodedLen(&decode_buffer, encoded, 32));
+    const encoded = try Encoder.encode(&encode_buffer, &source);
+    try testing.expectError(error.DecodedTooLong, Decoder.decodeWithMaxDecodedLen(&decode_buffer, encoded, 32));
 }
 
-test "bitcoin base58check decodeWithMaxPayloadLen enforces cap" {
+test "base58check decodeWithMaxPayloadLen enforces cap" {
     const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
 
     var decode_buffer: [256]u8 = undefined;
-    const ok = try bitcoin.CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, encoded, 20);
+    const ok = try CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, encoded, 20);
     try testing.expectEqual(@as(u8, 0), ok.version);
     try testing.expectEqual(@as(usize, 20), ok.payload.len);
 
-    try testing.expectError(error.DecodedTooLong, bitcoin.CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, encoded, 19));
+    try testing.expectError(error.DecodedTooLong, CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, encoded, 19));
 }
 
-test "bitcoin base58 random roundtrip property" {
+test "base58 random roundtrip property" {
     var prng = std.Random.DefaultPrng.init(0xa12b_c34d_e56f_7788);
     const random = prng.random();
 
@@ -757,16 +769,16 @@ test "bitcoin base58 random roundtrip property" {
         const decoded_len = random.uintLessThan(usize, decoded_source.len + 1);
         random.bytes(decoded_source[0..decoded_len]);
 
-        const encoded = try bitcoin.Encoder.encode(&encoded_buffer_a, decoded_source[0..decoded_len]);
-        const decoded = try bitcoin.Decoder.decode(&decoded_buffer, encoded);
+        const encoded = try Encoder.encode(&encoded_buffer_a, decoded_source[0..decoded_len]);
+        const decoded = try Decoder.decode(&decoded_buffer, encoded);
         try testing.expectEqualSlices(u8, decoded_source[0..decoded_len], decoded);
 
-        const encoded_again = try bitcoin.Encoder.encode(&encoded_buffer_b, decoded);
+        const encoded_again = try Encoder.encode(&encoded_buffer_b, decoded);
         try testing.expectEqualStrings(encoded, encoded_again);
     }
 }
 
-test "bitcoin base58check random roundtrip property" {
+test "base58check random roundtrip property" {
     var prng = std.Random.DefaultPrng.init(0x8ee7_6612_03ab_4d55);
     const random = prng.random();
 
@@ -781,29 +793,29 @@ test "bitcoin base58check random roundtrip property" {
         random.bytes(payload_buffer[0..payload_len]);
         const version = random.int(u8);
 
-        const encoded = try bitcoin.CheckEncoder.encode(&encoded_buffer_a, version, payload_buffer[0..payload_len]);
-        const decoded = try bitcoin.CheckDecoder.decode(&decoded_buffer, encoded);
+        const encoded = try CheckEncoder.encode(&encoded_buffer_a, version, payload_buffer[0..payload_len]);
+        const decoded = try CheckDecoder.decode(&decoded_buffer, encoded);
         try testing.expectEqual(version, decoded.version);
         try testing.expectEqualSlices(u8, payload_buffer[0..payload_len], decoded.payload);
 
-        const encoded_again = try bitcoin.CheckEncoder.encode(&encoded_buffer_b, decoded.version, decoded.payload);
+        const encoded_again = try CheckEncoder.encode(&encoded_buffer_b, decoded.version, decoded.payload);
         try testing.expectEqualStrings(encoded, encoded_again);
     }
 }
 
-test "bitcoin base58 rejects all non-alphabet bytes" {
+test "base58 rejects all non-alphabet bytes" {
     var decode_buffer: [8]u8 = undefined;
     var source: [1]u8 = undefined;
 
     for (0..256) |i| {
         source[0] = @intCast(i);
-        if (bitcoin_char_to_index[source[0]] == invalid_char) {
-            try testing.expectError(error.InvalidCharacter, bitcoin.Decoder.decode(&decode_buffer, &source));
+        if (char_to_index[source[0]] == invalid_char) {
+            try testing.expectError(error.InvalidCharacter, Decoder.decode(&decode_buffer, &source));
         }
     }
 }
 
-test "bitcoin base58 random garbage either fails or canonicalizes" {
+test "base58 random garbage either fails or canonicalizes" {
     var prng = std.Random.DefaultPrng.init(0x16bc_9f22_4451_7a20);
     const random = prng.random();
 
@@ -817,9 +829,9 @@ test "bitcoin base58 random garbage either fails or canonicalizes" {
         const garbage_len = random.uintLessThan(usize, garbage.len + 1);
         random.bytes(garbage[0..garbage_len]);
 
-        if (bitcoin.Decoder.decode(&decoded_buffer, garbage[0..garbage_len])) |decoded| {
-            const encoded = try bitcoin.Encoder.encode(&encoded_buffer, decoded);
-            const decoded_again = try bitcoin.Decoder.decode(&decoded_buffer_again, encoded);
+        if (Decoder.decode(&decoded_buffer, garbage[0..garbage_len])) |decoded| {
+            const encoded = try Encoder.encode(&encoded_buffer, decoded);
+            const decoded_again = try Decoder.decode(&decoded_buffer_again, encoded);
             try testing.expectEqualSlices(u8, decoded, decoded_again);
         } else |err| switch (err) {
             error.InvalidCharacter => {},
@@ -828,7 +840,7 @@ test "bitcoin base58 random garbage either fails or canonicalizes" {
     }
 }
 
-test "bitcoin base58 additional known vectors" {
+test "base58 additional known vectors" {
     const cases = [_]struct {
         hex: []const u8,
         encoded: []const u8,
@@ -854,15 +866,15 @@ test "bitcoin base58 additional known vectors" {
 
     for (cases) |c| {
         const decoded_from_hex = try std.fmt.hexToBytes(&decode_from_hex_buffer, c.hex);
-        const encoded = try bitcoin.Encoder.encode(&encode_buffer, decoded_from_hex);
+        const encoded = try Encoder.encode(&encode_buffer, decoded_from_hex);
         try testing.expectEqualStrings(c.encoded, encoded);
 
-        const decoded = try bitcoin.Decoder.decode(&decode_buffer, c.encoded);
+        const decoded = try Decoder.decode(&decode_buffer, c.encoded);
         try testing.expectEqualSlices(u8, decoded_from_hex, decoded);
     }
 }
 
-test "bitcoin base58 decode boundary failure matrix" {
+test "base58 decode boundary failure matrix" {
     var decode_buffer: [128]u8 = undefined;
 
     const invalid_samples = [_][]const u8{
@@ -878,55 +890,55 @@ test "bitcoin base58 decode boundary failure matrix" {
         "\xff",
     };
     for (invalid_samples) |sample| {
-        try testing.expectError(error.InvalidCharacter, bitcoin.Decoder.decode(&decode_buffer, sample));
+        try testing.expectError(error.InvalidCharacter, Decoder.decode(&decode_buffer, sample));
     }
 
-    try testing.expectError(error.DecodedTooLong, bitcoin.Decoder.decodeWithMaxDecodedLen(&decode_buffer, "111111111111111111111111111111111", 32));
-    try testing.expectError(error.BufferTooSmall, bitcoin.Decoder.decode(decode_buffer[0..11], "2NEpo7TZRRrLZSi2U"));
+    try testing.expectError(error.DecodedTooLong, Decoder.decodeWithMaxDecodedLen(&decode_buffer, "111111111111111111111111111111111", 32));
+    try testing.expectError(error.BufferTooSmall, Decoder.decode(decode_buffer[0..11], "2NEpo7TZRRrLZSi2U"));
 }
 
-test "bitcoin base58check boundary failure matrix" {
+test "base58check boundary failure matrix" {
     var decode_buffer: [256]u8 = undefined;
 
-    try testing.expectError(error.DecodedTooShort, bitcoin.CheckDecoder.decode(&decode_buffer, "1111"));
-    try testing.expectError(error.InvalidChecksum, bitcoin.CheckDecoder.decode(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHJ"));
-    try testing.expectError(error.InvalidCharacter, bitcoin.CheckDecoder.decode(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmH0"));
-    try testing.expectError(error.DecodedTooLong, bitcoin.CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH", 19));
+    try testing.expectError(error.DecodedTooShort, CheckDecoder.decode(&decode_buffer, "1111"));
+    try testing.expectError(error.InvalidChecksum, CheckDecoder.decode(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHJ"));
+    try testing.expectError(error.InvalidCharacter, CheckDecoder.decode(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmH0"));
+    try testing.expectError(error.DecodedTooLong, CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH", 19));
 }
 
-test "bitcoin base58check encode buffer boundaries" {
+test "base58check encode buffer boundaries" {
     const version: u8 = 0;
     const payload = [_]u8{ 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
     const expected = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
 
     var exact: [expected.len]u8 = undefined;
-    const encoded_exact = try bitcoin.CheckEncoder.encode(&exact, version, &payload);
+    const encoded_exact = try CheckEncoder.encode(&exact, version, &payload);
     try testing.expectEqualStrings(expected, encoded_exact);
 
     var short: [expected.len - 1]u8 = undefined;
-    try testing.expectError(error.BufferTooSmall, bitcoin.CheckEncoder.encode(&short, version, &payload));
+    try testing.expectError(error.BufferTooSmall, CheckEncoder.encode(&short, version, &payload));
 
     var padded: [96]u8 = undefined;
     @memset(&padded, 0xAA);
-    const encoded_padded = try bitcoin.CheckEncoder.encode(&padded, version, &payload);
+    const encoded_padded = try CheckEncoder.encode(&padded, version, &payload);
     try testing.expectEqualStrings(expected, encoded_padded);
     for (padded[encoded_padded.len..]) |b| try testing.expectEqual(@as(u8, 0xAA), b);
 }
 
-test "bitcoin base58check decode buffer boundaries" {
+test "base58check decode buffer boundaries" {
     const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
     const decoded_len = 1 + 20 + checksum_len;
 
     var exact: [decoded_len]u8 = undefined;
-    const decoded_exact = try bitcoin.CheckDecoder.decode(&exact, encoded);
+    const decoded_exact = try CheckDecoder.decode(&exact, encoded);
     try testing.expectEqual(@as(usize, 20), decoded_exact.payload.len);
 
     var short: [decoded_len - 1]u8 = undefined;
-    try testing.expectError(error.BufferTooSmall, bitcoin.CheckDecoder.decode(&short, encoded));
+    try testing.expectError(error.BufferTooSmall, CheckDecoder.decode(&short, encoded));
 
     var padded: [decoded_len + 16]u8 = undefined;
     @memset(&padded, 0xAA);
-    const decoded_padded = try bitcoin.CheckDecoder.decode(&padded, encoded);
+    const decoded_padded = try CheckDecoder.decode(&padded, encoded);
     const used = 1 + decoded_padded.payload.len + checksum_len;
     for (padded[used..]) |b| try testing.expectEqual(@as(u8, 0xAA), b);
 }
