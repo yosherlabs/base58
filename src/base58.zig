@@ -18,6 +18,12 @@ const invalid_char: u8 = 0xff;
 const checksum_len: usize = 4;
 const max_usize = std.math.maxInt(usize);
 const char_to_index = buildCharToIndexTable(alphabet_chars);
+const known_check_version: u8 = 0;
+const known_check_payload = [_]u8{
+    248, 145, 115, 3,  191, 168, 239, 36,  242, 146,
+    232, 250, 20,  25, 178, 4,   96,  186, 6,   77,
+};
+const known_check_encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
 
 comptime {
     assert(checksum_len == 4);
@@ -68,7 +74,10 @@ pub const Base58Encoder = struct {
         assert(significant_len + leading_zeros == source.len);
         if (significant_len == 0) return leading_zeros;
 
-        const upper_bound = checkedAddOrMax(leading_zeros, scaledUpperBound(significant_len, 138, 100));
+        const upper_bound = checkedAddOrMax(
+            leading_zeros,
+            scaledUpperBound(significant_len, 138, 100),
+        );
         assert(upper_bound >= leading_zeros);
         return upper_bound;
     }
@@ -112,7 +121,10 @@ pub const Base58Decoder = struct {
         assert(significant_len + leading_ones == source.len);
         if (significant_len == 0) return leading_ones;
 
-        const upper_bound = checkedAddOrMax(leading_ones, scaledUpperBound(significant_len, 11, 15));
+        const upper_bound = checkedAddOrMax(
+            leading_ones,
+            scaledUpperBound(significant_len, 11, 15),
+        );
         assert(upper_bound >= leading_ones);
         return upper_bound;
     }
@@ -124,7 +136,12 @@ pub const Base58Decoder = struct {
 
     /// Decodes `source` into `dest` with a hard cap for decoded size.
     /// Useful for untrusted input where callers want to bound work and output.
-    pub fn decodeWithMaxDecodedLen(decoder: *const Base58Decoder, dest: []u8, source: []const u8, max_decoded_len: usize) Error![]const u8 {
+    pub fn decodeWithMaxDecodedLen(
+        decoder: *const Base58Decoder,
+        dest: []u8,
+        source: []const u8,
+        max_decoded_len: usize,
+    ) Error![]const u8 {
         _ = decoder;
         if (!@inComptime() and slicesOverlap(dest, source)) return error.OverlappingBuffers;
 
@@ -185,7 +202,12 @@ pub const Base58CheckEncoder = struct {
     }
 
     /// Encodes `version + payload + checksum(version+payload)` into Base58.
-    pub fn encode(check_encoder: *const Base58CheckEncoder, dest: []u8, version: u8, payload: []const u8) Error![]const u8 {
+    pub fn encode(
+        check_encoder: *const Base58CheckEncoder,
+        dest: []u8,
+        version: u8,
+        payload: []const u8,
+    ) Error![]const u8 {
         _ = check_encoder;
         if (!@inComptime() and slicesOverlap(dest, payload)) return error.OverlappingBuffers;
 
@@ -202,8 +224,10 @@ pub const Base58CheckEncoder = struct {
 
         var i: usize = 0;
         while (i < length) : (i += 1) {
+            assert(dest[i] < alphabet_chars.len);
             dest[i] = alphabet_chars[dest[i]];
         }
+        assert(length <= dest.len);
         std.mem.reverse(u8, dest[0..length]);
         return dest[0..length];
     }
@@ -218,14 +242,20 @@ pub const Base58CheckDecoder = struct {
     }
 
     /// Returns a tighter upper bound for decoded bytes (including version+checksum).
-    pub fn calcSizeUpperBoundForSlice(check_decoder: *const Base58CheckDecoder, source: []const u8) usize {
+    pub fn calcSizeUpperBoundForSlice(
+        check_decoder: *const Base58CheckDecoder,
+        source: []const u8,
+    ) usize {
         _ = check_decoder;
         const decoder = Base58Decoder{};
         return decoder.calcSizeUpperBoundForSlice(source);
     }
 
     /// Returns a safe upper bound for payload length after successful Base58Check decode.
-    pub fn calcPayloadSizeUpperBound(check_decoder: *const Base58CheckDecoder, source_len: usize) usize {
+    pub fn calcPayloadSizeUpperBound(
+        check_decoder: *const Base58CheckDecoder,
+        source_len: usize,
+    ) usize {
         const decoded_upper = check_decoder.calcSizeUpperBound(source_len);
         if (decoded_upper < 1 + checksum_len) return 0;
 
@@ -235,7 +265,10 @@ pub const Base58CheckDecoder = struct {
     }
 
     /// Returns a tighter upper bound for payload length after successful Base58Check decode.
-    pub fn calcPayloadSizeUpperBoundForSlice(check_decoder: *const Base58CheckDecoder, source: []const u8) usize {
+    pub fn calcPayloadSizeUpperBoundForSlice(
+        check_decoder: *const Base58CheckDecoder,
+        source: []const u8,
+    ) usize {
         const decoded_upper = check_decoder.calcSizeUpperBoundForSlice(source);
         if (decoded_upper < 1 + checksum_len) return 0;
 
@@ -245,7 +278,11 @@ pub const Base58CheckDecoder = struct {
     }
 
     /// Decodes Base58Check bytes, validates checksum, and returns version + payload view.
-    pub fn decode(check_decoder: *const Base58CheckDecoder, dest: []u8, source: []const u8) Error!DecodedCheck {
+    pub fn decode(
+        check_decoder: *const Base58CheckDecoder,
+        dest: []u8,
+        source: []const u8,
+    ) Error!DecodedCheck {
         _ = check_decoder;
         const decoder = Base58Decoder{};
         const decoded = try decoder.decode(dest, source);
@@ -265,9 +302,18 @@ pub const Base58CheckDecoder = struct {
     }
 
     /// Decodes Base58Check with an explicit payload-size cap.
-    pub fn decodeWithMaxPayloadLen(check_decoder: *const Base58CheckDecoder, dest: []u8, source: []const u8, max_payload_len: usize) Error!DecodedCheck {
+    pub fn decodeWithMaxPayloadLen(
+        check_decoder: *const Base58CheckDecoder,
+        dest: []u8,
+        source: []const u8,
+        max_payload_len: usize,
+    ) Error!DecodedCheck {
         _ = check_decoder;
-        const max_decoded_len = std.math.add(usize, max_payload_len, 1 + checksum_len) catch return error.DecodedTooLong;
+        const max_decoded_len = std.math.add(
+            usize,
+            max_payload_len,
+            1 + checksum_len,
+        ) catch return error.DecodedTooLong;
         assert(max_decoded_len >= 1 + checksum_len);
         const decoder = Base58Decoder{};
         const decoded = try decoder.decodeWithMaxDecodedLen(dest, source, max_decoded_len);
@@ -280,7 +326,9 @@ pub const Base58CheckDecoder = struct {
             return error.InvalidChecksum;
         }
 
-        if (check_start - 1 > max_payload_len) return error.DecodedTooLong;
+        const payload_len = check_start - 1;
+        if (payload_len > max_payload_len) return error.DecodedTooLong;
+        assert(payload_len <= max_payload_len);
 
         return DecodedCheck{
             .version = decoded[0],
@@ -326,7 +374,11 @@ pub fn getDecodedLengthUpperBoundForSlice(encoded: []const u8) usize {
     return Decoder.calcSizeUpperBoundForSlice(encoded);
 }
 
-pub fn decodeWithMaxDecodedLength(dest: []u8, encoded: []const u8, max_decoded_len: usize) Error![]const u8 {
+pub fn decodeWithMaxDecodedLength(
+    dest: []u8,
+    encoded: []const u8,
+    max_decoded_len: usize,
+) Error![]const u8 {
     return Decoder.decodeWithMaxDecodedLen(dest, encoded, max_decoded_len);
 }
 
@@ -342,7 +394,11 @@ pub fn getDecodedCheckPayloadLengthUpperBoundForSlice(encoded: []const u8) usize
     return CheckDecoder.calcPayloadSizeUpperBoundForSlice(encoded);
 }
 
-pub fn decodeCheckWithMaxPayloadLength(dest: []u8, encoded: []const u8, max_payload_len: usize) Error!DecodedCheck {
+pub fn decodeCheckWithMaxPayloadLength(
+    dest: []u8,
+    encoded: []const u8,
+    max_payload_len: usize,
+) Error!DecodedCheck {
     return CheckDecoder.decodeWithMaxPayloadLen(dest, encoded, max_payload_len);
 }
 
@@ -380,6 +436,7 @@ pub fn comptimeGetDecodedLength(comptime encoded: []const u8) usize {
             carry >>= 8;
         }
         while (carry > 0) : (carry >>= 8) {
+            if (length == buffer.len) unreachable;
             buffer[length] = @truncate(carry);
             length += 1;
         }
@@ -406,6 +463,7 @@ pub fn comptimeDecode(comptime encoded: []const u8) [comptimeGetDecodedLength(en
             carry >>= 8;
         }
         while (carry > 0) : (carry >>= 8) {
+            if (length == buffer.len) unreachable;
             buffer[length] = @truncate(carry);
             length += 1;
         }
@@ -428,7 +486,10 @@ pub fn comptimeGetEncodedCheckLength(comptime version: u8, comptime payload: []c
     return encoded.len;
 }
 
-pub fn comptimeEncodeCheck(comptime version: u8, comptime payload: []const u8) [comptimeGetEncodedCheckLength(version, payload)]u8 {
+pub fn comptimeEncodeCheck(
+    comptime version: u8,
+    comptime payload: []const u8,
+) [comptimeGetEncodedCheckLength(version, payload)]u8 {
     @setEvalBranchQuota(100_000);
     var buffer: [getEncodedCheckLengthUpperBound(payload.len)]u8 = undefined;
     const encoded = CheckEncoder.encode(&buffer, version, payload) catch unreachable;
@@ -450,7 +511,9 @@ pub fn comptimeGetDecodedCheckPayloadLength(comptime encoded: []const u8) usize 
     return check_start - 1;
 }
 
-pub fn comptimeDecodeCheck(comptime encoded: []const u8) DecodedCheckComptime(comptimeGetDecodedCheckPayloadLength(encoded)) {
+pub fn comptimeDecodeCheck(
+    comptime encoded: []const u8,
+) DecodedCheckComptime(comptimeGetDecodedCheckPayloadLength(encoded)) {
     @setEvalBranchQuota(100_000);
     const decoded = comptimeDecode(encoded);
     if (decoded.len < 1 + checksum_len) unreachable;
@@ -556,18 +619,29 @@ fn slicesOverlap(a: []const u8, b: []const u8) bool {
 
 fn countLeadingZeroBytesCheck(version: u8, payload: []const u8, check: [checksum_len]u8) usize {
     var count: usize = 0;
+    const max_count = 1 + payload.len + check.len;
 
     if (version != 0) return 0;
     count += 1;
+    assert(count <= max_count);
 
     for (payload) |b| {
-        if (b != 0) return count;
+        if (b != 0) {
+            assert(count <= max_count);
+            return count;
+        }
         count += 1;
+        assert(count <= max_count);
     }
     for (check) |b| {
-        if (b != 0) return count;
+        if (b != 0) {
+            assert(count <= max_count);
+            return count;
+        }
         count += 1;
+        assert(count <= max_count);
     }
+    assert(count == max_count);
     return count;
 }
 
@@ -631,7 +705,10 @@ test "base58 returns BufferTooSmall" {
     try testing.expectError(error.BufferTooSmall, Encoder.encode(&encode_buffer, "Hello World!"));
 
     var decode_buffer: [11]u8 = undefined;
-    try testing.expectError(error.BufferTooSmall, Decoder.decode(&decode_buffer, "2NEpo7TZRRrLZSi2U"));
+    try testing.expectError(
+        error.BufferTooSmall,
+        Decoder.decode(&decode_buffer, "2NEpo7TZRRrLZSi2U"),
+    );
 }
 
 test "base58 rejects overlapping buffers" {
@@ -643,7 +720,10 @@ test "base58 rejects overlapping buffers" {
 
     const encoded = "2NEpo7TZRRrLZSi2U";
     @memcpy(overlap[0..encoded.len], encoded);
-    try testing.expectError(error.OverlappingBuffers, Decoder.decode(overlap[0..], overlap[0..encoded.len]));
+    try testing.expectError(
+        error.OverlappingBuffers,
+        Decoder.decode(overlap[0..], overlap[0..encoded.len]),
+    );
 }
 
 test "base58 bounds are safe for known vectors" {
@@ -654,23 +734,26 @@ test "base58 bounds are safe for known vectors" {
 }
 
 test "base58check known vector" {
-    const version: u8 = 0;
-    const payload = [_]u8{ 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
-    const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
-
     var decode_buffer: [256]u8 = undefined;
-    const decoded = try CheckDecoder.decode(&decode_buffer, encoded);
-    try testing.expectEqual(version, decoded.version);
-    try testing.expectEqualSlices(u8, &payload, decoded.payload);
+    const decoded = try CheckDecoder.decode(&decode_buffer, known_check_encoded);
+    try testing.expectEqual(known_check_version, decoded.version);
+    try testing.expectEqualSlices(u8, &known_check_payload, decoded.payload);
 
     var encode_buffer: [256]u8 = undefined;
-    const encoded_roundtrip = try CheckEncoder.encode(&encode_buffer, version, &payload);
-    try testing.expectEqualStrings(encoded, encoded_roundtrip);
+    const encoded_roundtrip = try CheckEncoder.encode(
+        &encode_buffer,
+        known_check_version,
+        &known_check_payload,
+    );
+    try testing.expectEqualStrings(known_check_encoded, encoded_roundtrip);
 }
 
 test "base58check returns InvalidChecksum" {
     var buffer: [256]u8 = undefined;
-    try testing.expectError(error.InvalidChecksum, CheckDecoder.decode(&buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHJ"));
+    try testing.expectError(
+        error.InvalidChecksum,
+        CheckDecoder.decode(&buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHJ"),
+    );
 }
 
 test "base58check returns DecodedTooShort" {
@@ -679,17 +762,19 @@ test "base58check returns DecodedTooShort" {
 }
 
 test "base58check rejects overlapping buffers" {
-    const version: u8 = 0;
-    const payload = [_]u8{ 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
-
     var overlap: [256]u8 = undefined;
     @memset(&overlap, 0);
-    @memcpy(overlap[0..payload.len], &payload);
-    try testing.expectError(error.OverlappingBuffers, CheckEncoder.encode(overlap[0..], version, overlap[0..payload.len]));
+    @memcpy(overlap[0..known_check_payload.len], &known_check_payload);
+    try testing.expectError(
+        error.OverlappingBuffers,
+        CheckEncoder.encode(overlap[0..], known_check_version, overlap[0..known_check_payload.len]),
+    );
 
-    const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
-    @memcpy(overlap[0..encoded.len], encoded);
-    try testing.expectError(error.OverlappingBuffers, CheckDecoder.decode(overlap[0..], overlap[0..encoded.len]));
+    @memcpy(overlap[0..known_check_encoded.len], known_check_encoded);
+    try testing.expectError(
+        error.OverlappingBuffers,
+        CheckDecoder.decode(overlap[0..], overlap[0..known_check_encoded.len]),
+    );
 }
 
 test "base58check bounds are safe" {
@@ -700,7 +785,9 @@ test "base58check bounds are safe" {
     const encoded = try CheckEncoder.encode(&encoded_buffer, version, &payload);
 
     try testing.expect(getEncodedCheckLengthUpperBound(payload.len) >= encoded.len);
-    try testing.expect(getDecodedLengthUpperBoundForSlice(encoded) >= (payload.len + 1 + checksum_len));
+    try testing.expect(
+        getDecodedLengthUpperBoundForSlice(encoded) >= (payload.len + 1 + checksum_len),
+    );
     try testing.expect(getDecodedCheckPayloadLengthUpperBoundForSlice(encoded) >= payload.len);
 }
 
@@ -716,14 +803,12 @@ test "comptime base58 wrappers" {
 }
 
 test "comptime base58check wrappers" {
-    const version: u8 = 0;
-    const payload = [_]u8{ 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
-    const encoded = comptimeEncodeCheck(version, &payload);
-    try testing.expectEqualStrings("1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH", &encoded);
+    const encoded = comptimeEncodeCheck(known_check_version, &known_check_payload);
+    try testing.expectEqualStrings(known_check_encoded, &encoded);
 
-    const decoded = comptimeDecodeCheck("1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH");
-    try testing.expectEqual(version, decoded.version);
-    try testing.expectEqualSlices(u8, &payload, &decoded.payload);
+    const decoded = comptimeDecodeCheck(known_check_encoded);
+    try testing.expectEqual(known_check_version, decoded.version);
+    try testing.expectEqualSlices(u8, &known_check_payload, &decoded.payload);
 }
 
 test "base58 upper-bound helpers saturate on overflow" {
@@ -734,25 +819,32 @@ test "base58 upper-bound helpers saturate on overflow" {
 test "base58 decodeWithMaxDecodedLen enforces cap" {
     var decode_buffer: [256]u8 = undefined;
 
-    try testing.expectError(error.DecodedTooLong, Decoder.decodeWithMaxDecodedLen(&decode_buffer, "11111", 4));
+    try testing.expectError(
+        error.DecodedTooLong,
+        Decoder.decodeWithMaxDecodedLen(&decode_buffer, "11111", 4),
+    );
     const exact = try Decoder.decodeWithMaxDecodedLen(&decode_buffer, "11111", 5);
     try testing.expectEqual(@as(usize, 5), exact.len);
 
     const source = [_]u8{0xff} ** 33;
     var encode_buffer: [256]u8 = undefined;
     const encoded = try Encoder.encode(&encode_buffer, &source);
-    try testing.expectError(error.DecodedTooLong, Decoder.decodeWithMaxDecodedLen(&decode_buffer, encoded, 32));
+    try testing.expectError(
+        error.DecodedTooLong,
+        Decoder.decodeWithMaxDecodedLen(&decode_buffer, encoded, 32),
+    );
 }
 
 test "base58check decodeWithMaxPayloadLen enforces cap" {
-    const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
-
     var decode_buffer: [256]u8 = undefined;
-    const ok = try CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, encoded, 20);
+    const ok = try CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, known_check_encoded, 20);
     try testing.expectEqual(@as(u8, 0), ok.version);
     try testing.expectEqual(@as(usize, 20), ok.payload.len);
 
-    try testing.expectError(error.DecodedTooLong, CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, encoded, 19));
+    try testing.expectError(
+        error.DecodedTooLong,
+        CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, known_check_encoded, 19),
+    );
 }
 
 test "base58 random roundtrip property" {
@@ -793,12 +885,20 @@ test "base58check random roundtrip property" {
         random.bytes(payload_buffer[0..payload_len]);
         const version = random.int(u8);
 
-        const encoded = try CheckEncoder.encode(&encoded_buffer_a, version, payload_buffer[0..payload_len]);
+        const encoded = try CheckEncoder.encode(
+            &encoded_buffer_a,
+            version,
+            payload_buffer[0..payload_len],
+        );
         const decoded = try CheckDecoder.decode(&decoded_buffer, encoded);
         try testing.expectEqual(version, decoded.version);
         try testing.expectEqualSlices(u8, payload_buffer[0..payload_len], decoded.payload);
 
-        const encoded_again = try CheckEncoder.encode(&encoded_buffer_b, decoded.version, decoded.payload);
+        const encoded_again = try CheckEncoder.encode(
+            &encoded_buffer_b,
+            decoded.version,
+            decoded.payload,
+        );
         try testing.expectEqualStrings(encoded, encoded_again);
     }
 }
@@ -810,7 +910,10 @@ test "base58 rejects all non-alphabet bytes" {
     for (0..256) |i| {
         source[0] = @intCast(i);
         if (char_to_index[source[0]] == invalid_char) {
-            try testing.expectError(error.InvalidCharacter, Decoder.decode(&decode_buffer, &source));
+            try testing.expectError(
+                error.InvalidCharacter,
+                Decoder.decode(&decode_buffer, &source),
+            );
         }
     }
 }
@@ -849,15 +952,26 @@ test "base58 additional known vectors" {
         .{ .hex = "61", .encoded = "2g" },
         .{ .hex = "626262", .encoded = "a3gV" },
         .{ .hex = "636363", .encoded = "aPEr" },
-        .{ .hex = "73696d706c792061206c6f6e6720737472696e67", .encoded = "2cFupjhnEsSn59qHXstmK2ffpLv2" },
-        .{ .hex = "00eb15231dfceb60925886b67d065299925915aeb172c06647", .encoded = "1NS17iag9jJgTHD1VXjvLCEnZuQ3rJDE9L" },
+        .{
+            .hex = "73696d706c792061206c6f6e6720737472696e67",
+            .encoded = "2cFupjhnEsSn59qHXstmK2ffpLv2",
+        },
+        .{
+            .hex = "00eb15231dfceb60925886b67d065299925915aeb172c06647",
+            .encoded = "1NS17iag9jJgTHD1VXjvLCEnZuQ3rJDE9L",
+        },
         .{ .hex = "516b6fcd0f", .encoded = "ABnLTmg" },
         .{ .hex = "bf4f89001e670274dd", .encoded = "3SEo3LWLoPntC" },
         .{ .hex = "572e4794", .encoded = "3EFU7m" },
         .{ .hex = "ecac89cad93923c02321", .encoded = "EJDM8drfXA6uyA" },
         .{ .hex = "10c8511e", .encoded = "Rt5zm" },
         .{ .hex = "00000000000000000000", .encoded = "1111111111" },
-        .{ .hex = "000111d38e5fc9071ffcd20b4a763cc9ae4f252bb4e48fd66a835e252ada93ff480d6dd43dc62a641155a5", .encoded = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz" },
+        .{
+            .hex = "000111d38e5fc9071ffcd20b4a763cc9ae4f252bb4e48fd66a835e252ada93ff480d6dd43" ++
+                "dc62a" ++
+                "641155a5",
+            .encoded = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz",
+        },
     };
 
     var decode_from_hex_buffer: [1024]u8 = undefined;
@@ -893,52 +1007,76 @@ test "base58 decode boundary failure matrix" {
         try testing.expectError(error.InvalidCharacter, Decoder.decode(&decode_buffer, sample));
     }
 
-    try testing.expectError(error.DecodedTooLong, Decoder.decodeWithMaxDecodedLen(&decode_buffer, "111111111111111111111111111111111", 32));
-    try testing.expectError(error.BufferTooSmall, Decoder.decode(decode_buffer[0..11], "2NEpo7TZRRrLZSi2U"));
+    try testing.expectError(
+        error.DecodedTooLong,
+        Decoder.decodeWithMaxDecodedLen(&decode_buffer, "111111111111111111111111111111111", 32),
+    );
+    try testing.expectError(
+        error.BufferTooSmall,
+        Decoder.decode(decode_buffer[0..11], "2NEpo7TZRRrLZSi2U"),
+    );
 }
 
 test "base58check boundary failure matrix" {
     var decode_buffer: [256]u8 = undefined;
 
     try testing.expectError(error.DecodedTooShort, CheckDecoder.decode(&decode_buffer, "1111"));
-    try testing.expectError(error.InvalidChecksum, CheckDecoder.decode(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHJ"));
-    try testing.expectError(error.InvalidCharacter, CheckDecoder.decode(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmH0"));
-    try testing.expectError(error.DecodedTooLong, CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH", 19));
+    try testing.expectError(
+        error.InvalidChecksum,
+        CheckDecoder.decode(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHJ"),
+    );
+    try testing.expectError(
+        error.InvalidCharacter,
+        CheckDecoder.decode(&decode_buffer, "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmH0"),
+    );
+    try testing.expectError(
+        error.DecodedTooLong,
+        CheckDecoder.decodeWithMaxPayloadLen(&decode_buffer, known_check_encoded, 19),
+    );
 }
 
 test "base58check encode buffer boundaries" {
-    const version: u8 = 0;
-    const payload = [_]u8{ 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
-    const expected = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
+    var exact: [known_check_encoded.len]u8 = undefined;
+    const encoded_exact = try CheckEncoder.encode(
+        &exact,
+        known_check_version,
+        &known_check_payload,
+    );
+    try testing.expectEqualStrings(known_check_encoded, encoded_exact);
 
-    var exact: [expected.len]u8 = undefined;
-    const encoded_exact = try CheckEncoder.encode(&exact, version, &payload);
-    try testing.expectEqualStrings(expected, encoded_exact);
-
-    var short: [expected.len - 1]u8 = undefined;
-    try testing.expectError(error.BufferTooSmall, CheckEncoder.encode(&short, version, &payload));
+    var short: [known_check_encoded.len - 1]u8 = undefined;
+    try testing.expectError(
+        error.BufferTooSmall,
+        CheckEncoder.encode(&short, known_check_version, &known_check_payload),
+    );
 
     var padded: [96]u8 = undefined;
     @memset(&padded, 0xAA);
-    const encoded_padded = try CheckEncoder.encode(&padded, version, &payload);
-    try testing.expectEqualStrings(expected, encoded_padded);
+    const encoded_padded = try CheckEncoder.encode(
+        &padded,
+        known_check_version,
+        &known_check_payload,
+    );
+    try testing.expectEqualStrings(known_check_encoded, encoded_padded);
     for (padded[encoded_padded.len..]) |b| try testing.expectEqual(@as(u8, 0xAA), b);
 }
 
 test "base58check decode buffer boundaries" {
-    const encoded = "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH";
     const decoded_len = 1 + 20 + checksum_len;
 
     var exact: [decoded_len]u8 = undefined;
-    const decoded_exact = try CheckDecoder.decode(&exact, encoded);
+    const decoded_exact = try CheckDecoder.decode(&exact, known_check_encoded);
     try testing.expectEqual(@as(usize, 20), decoded_exact.payload.len);
 
     var short: [decoded_len - 1]u8 = undefined;
-    try testing.expectError(error.BufferTooSmall, CheckDecoder.decode(&short, encoded));
+    try testing.expectError(
+        error.BufferTooSmall,
+        CheckDecoder.decode(&short, known_check_encoded),
+    );
 
     var padded: [decoded_len + 16]u8 = undefined;
     @memset(&padded, 0xAA);
-    const decoded_padded = try CheckDecoder.decode(&padded, encoded);
+    const decoded_padded = try CheckDecoder.decode(&padded, known_check_encoded);
     const used = 1 + decoded_padded.payload.len + checksum_len;
     for (padded[used..]) |b| try testing.expectEqual(@as(u8, 0xAA), b);
 }
@@ -951,7 +1089,10 @@ const TestData = struct {
 fn testingData() []const TestData {
     return &[_]TestData{
         .{ .encoded = "", .decoded = "" },
-        .{ .encoded = "USm3fpXnKG5EUBx2ndxBDMPVciP5hGey2Jh4NDv6gmeo1LkMeiKrLJUUBk6Z", .decoded = "The quick brown fox jumps over the lazy dog." },
+        .{
+            .encoded = "USm3fpXnKG5EUBx2ndxBDMPVciP5hGey2Jh4NDv6gmeo1LkMeiKrLJUUBk6Z",
+            .decoded = "The quick brown fox jumps over the lazy dog.",
+        },
         .{ .encoded = "2NEpo7TZRRrLZSi2U", .decoded = "Hello World!" },
         .{ .encoded = "11233QC4", .decoded = &[_]u8{ 0, 0, 40, 127, 180, 205 } },
         .{ .encoded = "1", .decoded = &[_]u8{0} },

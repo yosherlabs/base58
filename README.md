@@ -9,7 +9,8 @@ This library intentionally ships one alphabet preset: Bitcoin Base58.
 - Runtime Base58 `encode` and `decode`.
 - Runtime Base58Check `encode` and `decode` (version + payload + checksum validation).
 - Compile-time Base58 and Base58Check encode/decode helpers.
-- Strict error handling (`InvalidCharacter`, `InvalidChecksum`, `BufferTooSmall`, `DecodedTooLong`, and more).
+- Strict error handling:
+  (`InvalidCharacter`, `InvalidChecksum`, `BufferTooSmall`, `DecodedTooLong`, and more).
 - Upper-bound sizing helpers so you can allocate fixed buffers safely.
 - Optional decode size caps for untrusted input.
 
