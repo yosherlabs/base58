@@ -1,4 +1,0 @@
-interface:
-  display_name: "Tiger Style"
-  short_description: "Apply safety, performance, and DX TigerStyle rules"
-  default_prompt: "Use $tiger-style to apply TigerStyle rules to this coding task."
